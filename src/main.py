@@ -27,97 +27,123 @@ options.hardware_mapping = 'regular'
 matrix = RGBMatrix(options = options)
 
 # Game variables
-width = 11
-height = 11
-offsetX = 16 - 6
-offsetY = 8 - 6
+class BattleSnakeGame:
+    def __init__(self):
+        # Host Variables
+        self.in_progress = False
+        self.queue = []
+        self.snake_images = {}
+        # Individual Game Variables
+        self.offsetX = 16 - 6
+        self.offsetY = 8 - 6
+        self.width = 11
+        self.height = 11
+        self.game_id = None
+        
+    def add_to_queue(self, game_id):
+        self.queue.append(game_id)
+        self.queue = list(dict.fromkeys(self.queue)) # Remove duplicates
+        print(f"Game {game_id} added to queue (size {len(self.queue)})")
+        if not self.in_progress:
+            self.start_next_game()
 
-# width = 25
-# height = 16
-# offsetX = 3
-# offsetY = 0
+    def play_game(self):
+        self.game_id = self.queue[0]
+        print(f"Game {self.game_id} playing from queue")
+        # Get game data
+        url = requests.get(f"https://engine.battlesnake.com/games/{self.game_id}")
+        data = json.loads(url.text)
+        self.width = data['Game']['Width']
+        self.height = data['Game']['Height']
+        self.offsetX = int(0.5 * (32 - self.width))
+        self.offsetY = int(0.5 * (16 - self.height))
 
-snake_images = {}
+        # websockets
+        wsapp = websocket.WebSocketApp(f"wss://engine.battlesnake.com/games/{self.game_id}/events", on_message=self.on_message, on_close=self.on_close)
+        wsapp.run_forever()
 
-def get_snake_image(head, tail, color):
-    key = f"{head}-{tail}-{color}"
-    color_string = color.lstrip("#")
-    if not key in snake_images:
-        url = f"https://exporter.battlesnake.com/avatars/head:{head}/tail:{tail}/color:%23{color_string}/32x16.svg"
-        raw = requests.get(url, stream=True).raw
-        # TODO: Actually load the svg somehow
-        im = Image.new("RGB", (32, 16))
-        snake_images[key] = im
-        return im
-    else:
-        return snake_images[key]
+    def start_next_game(self):
+        if self.in_progress:
+            return
+        if len(self.queue) == 0:
+            return
+        self.in_progress = True
+        self.t1 = Thread(target=self.play_game)
+        self.t1.start()
 
+    def get_snake_image(self, head, tail, color):
+        key = f"{head}-{tail}-{color}"
+        color_string = color.lstrip("#")
+        if not key in self.snake_images:
+            url = f"https://exporter.battlesnake.com/avatars/head:{head}/tail:{tail}/color:%23{color_string}/32x16.svg"
+            raw = requests.get(url, stream=True).raw
+            # TODO: Actually load the svg somehow
+            im = Image.new("RGB", (32, 16))
+            self.snake_images[key] = im
+            return im
+        else:
+            return self.snake_images[key]
+
+    def on_message(self, wsapp, msg):
+        message = json.loads(msg)
+        message_type = message['Type']
+        data = message["Data"]
+        if message_type == 'frame':
+            # print(f"Turn {data['Turn']} - {self.width}x{self.height} board")
+            canvas = matrix.CreateFrameCanvas()
+            canvas.Fill(32, 32 ,32)
+
+            # Draw a board
+            for x in range(0, self.width):
+                for y in range(0, self.height):
+                    canvas.SetPixel(self.offsetX + x, self.offsetY + y, 0, 0, 0)
+            
+            for o in data['Hazards']:
+                canvas.SetPixel(self.offsetX + o['X'], self.offsetY + self.height - o['Y'] - 1, 48, 24, 16)
+            
+            for o in data['Food']:
+                canvas.SetPixel(self.offsetX + o['X'], self.offsetY + self.height - o['Y'] - 1, 255, 92, 117)
+            for snake in data['Snakes']:
+                if snake["Death"]:
+                    continue
+                for i, o in enumerate(snake['Body']):
+                    (r, g, b) = ImageColor.getcolor(snake["Color"], "RGB")
+                    
+                    if i == 0:
+                        (r, g, b) = rgb_brightness((r, g, b), 2)
+                    elif i % 4 == 0:
+                        (r, g, b) = rgb_brightness((r, g, b), 0.5)
+                    
+                    canvas.SetPixel(self.offsetX + o['X'], self.offsetY + self.height - o['Y'] - 1, r, g, b)
+            canvas = matrix.SwapOnVSync(canvas)
+            # TODO: Make it so there's a max speed on playback
+        elif message_type == 'game_end':
+            # Draw a background snake
+            im = self.get_snake_image("orca", "round-bum", "#BAD455")
+            canvas.SetImage(im.convert('RGB'))
+            
+            # TODO: Paint the winning snake's head/tail in the background
+            wsapp.close()
+            return
+        else:
+            print(f"{message['Type']} message received")
+
+    def on_close(self, ws, close_status_code, close_msg):
+        self.in_progress = False
+        if self.game_id in self.queue: self.queue.remove(self.game_id)
+        print(f"Game {self.game_id} removed from queue (size {len(self.queue)})")
+        self.start_next_game()
+
+
+game = BattleSnakeGame()
+
+# Utility function
 def rgb_brightness(rgb, factor):
     (r, g, b) = rgb
     r = max(min(int(r * factor), 255), 0)
     g = max(min(int(g * factor), 255), 0)
     b = max(min(int(b * factor), 255), 0)
     return (r, g, b)
-
-
-def on_message(wsapp, msg):
-    message = json.loads(msg)
-    message_type = message['Type']
-    data = message["Data"]
-    if message_type == 'frame':
-        # print(f"Turn {data['Turn']} - {width}x{height} board")
-        canvas = matrix.CreateFrameCanvas()
-        canvas.Fill(0, 0, 0)
-
-        # Draw a board
-        for x in range(0, width):
-            for y in range(0, height):
-                canvas.SetPixel(offsetX + x, offsetY + y, 32, 32, 32)
-        
-        for o in data['Hazards']:
-            canvas.SetPixel(offsetX + o['X'], offsetY + height - o['Y'] - 1, 32, 12, 8)
-        
-        for o in data['Food']:
-            canvas.SetPixel(offsetX + o['X'], offsetY + height - o['Y'] - 1, 255, 92, 117)
-        for snake in data['Snakes']:
-            if snake["Death"]:
-                continue
-            for i, o in enumerate(snake['Body']):
-                (r, g, b) = ImageColor.getcolor(snake["Color"], "RGB")
-                
-                if i == 0:
-                    (r, g, b) = rgb_brightness((r, g, b), 2)
-                elif i % 4 == 0:
-                    (r, g, b) = rgb_brightness((r, g, b), 0.5)
-                
-                canvas.SetPixel(offsetX + o['X'], offsetY + height - o['Y'] - 1, r, g, b)
-        canvas = matrix.SwapOnVSync(canvas)
-    elif message_type == 'game_end':
-        # Draw a background snake
-        im = get_snake_image("orca", "round-bum", "#BAD455")
-        canvas.SetImage(im.convert('RGB'))
-        
-        # TODO: Paint the winning snake's head/tail in the background
-        print('complete')
-        wsapp.close()
-        return
-    else:
-        print(f"{message['Type']} message received")
-
-def on_close(ws, close_status_code, close_msg):
-    print(">>>>>>CLOSED")
-
-def start_websocket(game_id):
-    url = requests.get(f"https://engine.battlesnake.com/games/{game_id}")
-    data = json.loads(url.text)
-    width = data['Game']['Width']
-    height = data['Game']['Height']
-    # TODO: Figure out why the websocket messages still use the old width/height
-
-    # websockets
-    wsapp = websocket.WebSocketApp(f"wss://engine.battlesnake.com/games/{game_id}/events", on_message=on_message, on_close=on_close)
-    wsapp.run_forever()
-
 
 @app.get("/")
 def handle_info():
@@ -128,9 +154,7 @@ def handle_info():
     game_id = request.args.get('gameId')
     print(f"INFO {game_id}")
     if game_id:
-        t1 = Thread(target=start_websocket, args=(game_id,))
-        t1.start()
-    
+        game.add_to_queue(game_id)
     return logic.get_info()
 
 
