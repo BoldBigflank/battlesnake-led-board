@@ -20,6 +20,7 @@ app = Flask(__name__)
 # Configuration for the matrix
 options = RGBMatrixOptions()
 options.rows = 16
+options.cols = 32
 options.chain_length = 1
 options.parallel = 1
 options.hardware_mapping = 'regular'
@@ -57,6 +58,10 @@ class BattleSnakeGame:
         self.height = data['Game']['Height']
         self.offsetX = int(0.5 * (32 - self.width))
         self.offsetY = int(0.5 * (16 - self.height))
+        self.ruleset = data['Game']['Ruleset']['name']
+        if self.ruleset == 'wrapped':
+            self.offsetX = 0
+            self.offsetY = 0
 
         # websockets
         wsapp = websocket.WebSocketApp(f"wss://engine.battlesnake.com/games/{self.game_id}/events", on_message=self.on_message, on_close=self.on_close)
@@ -84,6 +89,18 @@ class BattleSnakeGame:
         else:
             return self.snake_images[key]
 
+    def set_pixel_on_board(self, canvas, x, y, r, g, b):
+        if self.ruleset == "wrapped":
+            while self.offsetX < options.cols:
+                while self.offsetY < options.rows:
+                    canvas.SetPixel(self.offsetX + x, self.offsetY + self.height - y - 1, r, g, b)
+                    self.offsetY += self.height
+                self.offsetY = 0
+                self.offsetX += self.width
+            self.offsetX = 0
+        else:
+            canvas.SetPixel(self.offsetX + x, self.offsetY + self.height - y - 1, r, g, b)
+
     def on_message(self, wsapp, msg):
         message = json.loads(msg)
         message_type = message['Type']
@@ -96,25 +113,25 @@ class BattleSnakeGame:
             # Draw a board
             for x in range(0, self.width):
                 for y in range(0, self.height):
-                    canvas.SetPixel(self.offsetX + x, self.offsetY + y, 0, 0, 0)
+                    self.set_pixel_on_board(canvas, x, y, 0, 0, 0)
             
             for o in data['Hazards']:
-                canvas.SetPixel(self.offsetX + o['X'], self.offsetY + self.height - o['Y'] - 1, 48, 24, 16)
+                self.set_pixel_on_board(canvas, o['X'], o['Y'], 48, 24, 16)
             
             for o in data['Food']:
-                canvas.SetPixel(self.offsetX + o['X'], self.offsetY + self.height - o['Y'] - 1, 255, 92, 117)
+                self.set_pixel_on_board(canvas, o['X'], o['Y'], 255, 92, 117)
             for snake in data['Snakes']:
                 if snake["Death"]:
                     continue
                 for i, o in enumerate(snake['Body']):
-                    (r, g, b) = ImageColor.getcolor(snake["Color"], "RGB")
-                    
+                    (r, g, b) = ImageColor.getcolor(snake["Color"], "RGB")                    
                     if i == 0:
                         (r, g, b) = rgb_brightness((r, g, b), 2)
                     elif i % 4 == 0:
                         (r, g, b) = rgb_brightness((r, g, b), 0.5)
                     
-                    canvas.SetPixel(self.offsetX + o['X'], self.offsetY + self.height - o['Y'] - 1, r, g, b)
+                    self.set_pixel_on_board(canvas, o['X'], o['Y'], r, g, b)
+
             canvas = matrix.SwapOnVSync(canvas)
             # TODO: Make it so there's a max speed on playback
         elif message_type == 'game_end':
