@@ -63,8 +63,9 @@ class BattleSnakeGame:
             self.offsetY = 0
 
         # websockets
-        self.wsapp = websocket.WebSocketApp(f"wss://engine.battlesnake.com/games/{self.game_id}/events", on_message=self.on_message, on_close=self.on_close)
-        self.wsapp.run_forever()
+        if not self.wsapp: # Another safeguard for race conditions
+            self.wsapp = websocket.WebSocketApp(f"wss://engine.battlesnake.com/games/{self.game_id}/events", on_message=self.on_message, on_close=self.on_close)
+            self.wsapp.run_forever()
 
     def start_next_game(self):
         if self.wsapp:
@@ -137,8 +138,8 @@ class BattleSnakeGame:
                 # canvas.SetImage(im.convert('RGB'))
                 
                 # TODO: Paint the winning snake's head/tail in the background
-                if self.wsapp: self.wsapp.close()
-                self.wsapp = None
+                if self.wsapp:
+                    self.wsapp.close()
                 return
             else:
                 print(f"Unhandled {message['Type']} message received")
