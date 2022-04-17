@@ -19,11 +19,11 @@ app = Flask(__name__)
 
 # Configuration for the matrix
 options = RGBMatrixOptions()
-options.rows = 16
+options.rows = 32
 options.cols = 32
 options.chain_length = 1
 options.parallel = 1
-options.hardware_mapping = 'regular'
+options.hardware_mapping = 'adafruit-hat'
 
 matrix = RGBMatrix(options = options)
 
@@ -56,7 +56,7 @@ class BattleSnakeGame:
         self.width = data['Game']['Width']
         self.height = data['Game']['Height']
         self.offsetX = int(0.5 * (32 - self.width))
-        self.offsetY = int(0.5 * (16 - self.height))
+        self.offsetY = int(0.5 * (32 - self.height))
         self.ruleset = data['Game']['Ruleset']['name']
         if self.ruleset == 'wrapped':
             self.offsetX = 0
@@ -66,7 +66,7 @@ class BattleSnakeGame:
         if not self.wsapp: # Another safeguard for race conditions
             self.wsapp = websocket.WebSocketApp(f"wss://engine.battlesnake.com/games/{self.game_id}/events", on_message=self.on_message)
             self.wsapp.run_forever()
-
+        
     def start_next_game(self):
         if self.wsapp:
             return
